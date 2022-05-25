@@ -1,7 +1,15 @@
 package dk.mitberedskab.gettingstartedwithkoltinredux.ui.store
 
 import android.util.Log
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import org.reduxkotlin.Dispatcher
+import org.reduxkotlin.GetState
+import org.reduxkotlin.Middleware
 import org.reduxkotlin.middleware
+import kotlin.coroutines.CoroutineContext
 
 /**
  * to-do model
@@ -25,7 +33,8 @@ enum class VisibilityFilter {
  * Actions
  */
 data class AddTodo(val text: String, val completed: Boolean = false)
-data class AddTodoAsync(val text: String, val completed: Boolean)
+data class AddTodoAsyncWithGlobalScope(val text: String, val completed: Boolean, val delay: Long)
+data class AddTodoAsyncWithSuppliedScope(val text: String, val completed: Boolean, val delay: Long, val scope: CoroutineScope)
 data class ToggleTodo(val index: Int)
 data class SetVisibilityFilter(val visibilityFilter: VisibilityFilter)
 
@@ -80,3 +89,125 @@ val loggerMiddleware = middleware<AppState> { store, next, action ->
     Log.d("next state:", "${store.state}")
     result
 }
+
+/**
+ * Thunk middleware for async action dispatches.
+ * Usage:
+ *    val store = createStore(myReducer, initialState,
+ *          applyMiddleware(thunk, myMiddleware))
+ *
+ *    fun myNetworkThunk(query: String): Thunk<AppState> = { dispatch, getState, extraArgument ->
+ *          launch {
+ *              dispatch(LoadingAction())
+ *              //do async stuff
+ *              val result = api.fetch(query)
+ *              dispatch(CompleteAction(result))
+ *          }
+ *      }
+ *
+ *    store.dispatch(myNetworkThunk("query"))
+ */
+
+
+fun asyncMiddlewares(
+    networkThunks: NetworkThunks
+) = middleware<AppState> { store, next, action ->
+    val dispatch = store.dispatch
+
+    when (action) {
+        is AddTodoAsyncWithGlobalScope -> {
+            dispatch(networkThunks.mockFetchGlobalScope(action.delay, action.text, action.completed))
+        }
+        is AddTodoAsyncWithSuppliedScope -> {
+            dispatch(networkThunks.mockFetchSuppliedScope(action.scope, action.delay, action.text, action.completed))
+        }
+        else -> next(action)
+    }
+}
+
+interface AppRepo {
+    suspend fun getTodo(delay: Long): Boolean
+}
+
+class MockRepo(): AppRepo {
+    override suspend fun getTodo(delay: Long): Boolean {
+        delay(delay)
+        return true
+    }
+}
+
+class NetworkThunks(
+    private val appRepo: AppRepo,
+    networkContext: CoroutineContext
+) {
+    private val networkScope = CoroutineScope(networkContext)
+
+    /**
+     *
+     */
+    fun mockFetchGlobalScope(
+        delay: Long,
+        text: String,
+        completed: Boolean
+    ) = thunk { dispatch, getState, extraArgument ->
+        networkScope.launch {
+
+            appRepo.getTodo(delay)
+
+            dispatch(AddTodo(text, completed))
+        }
+    }
+
+    fun mockFetchSuppliedScope(
+        scope: CoroutineScope,
+        delay: Long,
+        text: String,
+        completed: Boolean
+    ) = thunk { dispatch, getState, extraArgument ->
+        scope.launch(context = Dispatchers.IO) {
+
+            appRepo.getTodo(delay)
+
+            dispatch(AddTodo(text, completed))
+        }
+    }
+}
+
+
+/**
+ * Convenience function so state type does is not needed every time a thunk is created.
+ */
+fun thunk(thunkLambda: (dispatch: Dispatcher, getState: GetState<AppState>, extraArgument: Any?) -> Any) =
+    createThunk(thunkLambda)
+
+typealias Thunk<State> = (dispatch: Dispatcher, getState: GetState<State>, extraArg: Any?) -> Any
+typealias ThunkMiddleware<State> = Middleware<State>
+
+fun <State>createThunk(thunkLambda: (dispatch: Dispatcher, getState: GetState<State>, extraArgument: Any?) -> Any): Thunk<State> {
+    return object : Thunk<State> {
+        override fun invoke(dispatch: Dispatcher, getState: GetState<State>, extraArg: Any?) {
+            thunkLambda(dispatch, getState, extraArg)
+        }
+    }
+}
+
+fun <State> ThunkMiddleware<State>.withExtraArgument(arg: Any?) = createThunkMiddleware<State>(arg)
+
+fun <State> createThunkMiddleware(extraArgument: Any? = null): ThunkMiddleware<State> =
+    { store ->
+        { next: Dispatcher ->
+            { action: Any ->
+                if (action is Function<*>) {
+                    @Suppress("UNCHECKED_CAST")
+                    val thunk = try {
+                        (action as Thunk<*>)
+                    } catch (e: ClassCastException) {
+                        throw IllegalArgumentException("Dispatching functions must use type Thunk:", e)
+                    }
+                    thunk(store.dispatch, store.getState, extraArgument)
+                } else {
+                    next(action)
+                }
+            }
+        }
+    }

@@ -64,7 +64,6 @@ dependencies {
      * Redux
      */
     implementation "org.reduxkotlin:redux-kotlin-threadsafe-jvm:0.5.5"
-//    implementation "org.reduxkotlin:redux-kotlin-jvm-thunk:0.5.3"
 
     /**
      * Observe as state

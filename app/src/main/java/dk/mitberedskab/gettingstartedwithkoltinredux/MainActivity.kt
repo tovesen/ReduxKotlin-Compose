@@ -1,25 +1,19 @@
 package dk.mitberedskab.gettingstartedwithkoltinredux
 
 import android.os.Bundle
-import android.view.Display
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.Button
 import androidx.compose.material.MaterialTheme
 import androidx.compose.material.Surface
 import androidx.compose.material.Text
 import androidx.compose.runtime.*
-import androidx.compose.runtime.livedata.observeAsState
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.tooling.preview.Preview
-import androidx.lifecycle.LiveData
-import androidx.lifecycle.MutableLiveData
 import dk.mitberedskab.gettingstartedwithkoltinredux.ui.store.*
 import dk.mitberedskab.gettingstartedwithkoltinredux.ui.theme.GettingStartedWithKoltinReduxTheme
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.MainScope
 import org.reduxkotlin.*
 
 class MainActivity : ComponentActivity() {
@@ -27,6 +21,7 @@ class MainActivity : ComponentActivity() {
      * Prepare subscription to store
      */
     private lateinit var store: Store<AppState>
+    private val mainScope = MainScope()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -35,7 +30,14 @@ class MainActivity : ComponentActivity() {
             ::rootReducer,
             AppState(),
             applyMiddleware(
+                createThunkMiddleware(),
                 loggerMiddleware,
+                asyncMiddlewares(
+                    NetworkThunks(
+                        MockRepo(),
+                        mainScope.coroutineContext
+                    )
+                )
             ),
         )
 
@@ -46,16 +48,70 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colors.background
                 ) {
+                    val scope = rememberCoroutineScope()
                     withStore(store = store) {
                         val dispatcher = rememberDispatcher()
                         val todosSlice by selectMyState { todos }
 
-                        DisplayTodos( todosSlice) {
-                            dispatcher(AddTodo("Some Todo", false))
-                        }
+                        DisplayTodos(
+                            todosSlice,
+                            onSyncClick = {
+                                dispatcher(AddTodo("Some Todo", false))
+                            }, onAsyncGlobalClick = {
+                                dispatcher(AddTodoAsyncWithGlobalScope(
+                                        "Async Global Todo",
+                                        false,
+                                        1000
+                                    )
+                                )
+                            }, onAsyncSuppliedClick = {
+                                dispatcher(AddTodoAsyncWithSuppliedScope(
+                                    "Async Supplied Todo",
+                                    false,
+                                    1000,
+                                    scope
+                                    )
+                                )
+                            }
+                        )
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+fun DisplayTodos(
+    todos: List<Todo>?,
+    onSyncClick: ()->Unit,
+    onAsyncGlobalClick: ()->Unit,
+    onAsyncSuppliedClick: ()->Unit
+) {
+    Column {
+        Button(onClick = {
+            onSyncClick.invoke()
+        }) {
+            Text(text = "ADD SYNC TODO")
+        }
+        Button(onClick = {
+            onAsyncGlobalClick.invoke()
+        }) {
+            Text(text = "ADD GLOBAL ASYNC TODO")
+        }
+        Button(onClick = {
+            onAsyncSuppliedClick.invoke()
+        }) {
+            Text(text = "ADD SUPPLIED ASYNC TODO")
+        }
+        if (todos != null) {
+            LazyColumn {
+                items(todos.size) { index ->
+                    Text(text = todos[index].text )
+                }
+            }
+        } else {
+            Text(text = "Empty Todo list")
         }
     }
 }
@@ -103,22 +159,3 @@ inline fun <TState, TSlice> Store<TState>.selectState(
     return result
 }
 
-@Composable
-fun DisplayTodos(todos: List<Todo>?, onClick: ()->Unit) {
-    Column {
-        Button(onClick = {
-            onClick.invoke()
-        }) {
-            Text(text = "ADD TODO")
-        }
-        if (todos != null) {
-            LazyColumn {
-                items(todos.size) { index ->
-                    Text(text = todos[index].text )
-                }
-            }
-        } else {
-            Text(text = "Empty Todo list")
-        }
-    }
-}
