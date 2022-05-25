@@ -27,11 +27,11 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         store = createThreadSafeStore(
-            ::rootReducer,
+            rootReducer,
             AppState(),
             applyMiddleware(
-                createThunkMiddleware(),
                 loggerMiddleware,
+                createThunkMiddleware("extraArgument goes here"),
                 asyncMiddlewares(
                     NetworkThunks(
                         MockRepo(),
@@ -56,16 +56,16 @@ class MainActivity : ComponentActivity() {
                         DisplayTodos(
                             todosSlice,
                             onSyncClick = {
-                                dispatcher(AddTodo("Some Todo", false))
+                                dispatcher(TodoActions.AddTodo("Some Todo", false))
                             }, onAsyncGlobalClick = {
-                                dispatcher(AddTodoAsyncWithGlobalScope(
+                                dispatcher(TodoActions.AddTodoAsyncWithGlobalScope(
                                         "Async Global Todo",
                                         false,
                                         1000
                                     )
                                 )
                             }, onAsyncSuppliedClick = {
-                                dispatcher(AddTodoAsyncWithSuppliedScope(
+                                dispatcher(TodoActions.AddTodoAsyncWithSuppliedScope(
                                     "Async Supplied Todo",
                                     false,
                                     1000,

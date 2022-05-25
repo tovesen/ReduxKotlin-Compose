@@ -5,10 +5,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import org.reduxkotlin.Dispatcher
-import org.reduxkotlin.GetState
-import org.reduxkotlin.Middleware
-import org.reduxkotlin.middleware
+import org.reduxkotlin.*
 import kotlin.coroutines.CoroutineContext
 
 /**
@@ -32,11 +29,16 @@ enum class VisibilityFilter {
 /**
  * Actions
  */
-data class AddTodo(val text: String, val completed: Boolean = false)
-data class AddTodoAsyncWithGlobalScope(val text: String, val completed: Boolean, val delay: Long)
-data class AddTodoAsyncWithSuppliedScope(val text: String, val completed: Boolean, val delay: Long, val scope: CoroutineScope)
-data class ToggleTodo(val index: Int)
-data class SetVisibilityFilter(val visibilityFilter: VisibilityFilter)
+sealed class TodoActions {
+    data class AddTodo(val text: String, val completed: Boolean = false): TodoActions()
+    data class AddTodoAsyncWithGlobalScope(val text: String, val completed: Boolean, val delay: Long): TodoActions()
+    data class AddTodoAsyncWithSuppliedScope(val text: String, val completed: Boolean, val delay: Long, val scope: CoroutineScope): TodoActions()
+    data class ToggleTodo(val index: Int): TodoActions()
+}
+
+sealed class VisibilityActions {
+    data class SetVisibilityFilter(val visibilityFilter: VisibilityFilter): VisibilityActions()
+}
 
 /**
  * AppState
@@ -55,33 +57,46 @@ data class AppState(
     }
 }
 
-fun todosReducer(state: List<Todo>, action: Any) =
-    when (action) {
-        is AddTodo -> state + Todo(action.text, id = state.size)
-        is ToggleTodo -> state.mapIndexed { index, todo ->
-            if (index == action.index) {
-                todo.copy(completed = !todo.completed)
-            } else {
-                todo
-            }
-        }
-        else -> state
-    }
+//fun todosReducer(state: List<Todo>, action: Any) =
+//    when (action) {
+//        is AddTodo -> state + Todo(action.text, id = state.size)
+//        is ToggleTodo -> state.mapIndexed { index, todo ->
+//            if (index == action.index) {
+//                todo.copy(completed = !todo.completed)
+//            } else {
+//                todo
+//            }
+//        }
+//        else -> state
+//    }
 
-fun visibilityFilterReducer(state: VisibilityFilter, action: Any) =
-    when (action) {
-        is SetVisibilityFilter -> action.visibilityFilter
-        else -> state
+val todosReducer = reducerForActionType<AppState, TodoActions> { state, action ->
+    when(action) {
+        is TodoActions.AddTodo -> state.copy(todos = state.todos + Todo(action.text, id = state.todos.size))
+        else -> { state }
     }
+}
+
+val visibilityFilterReducer = reducerForActionType<AppState, VisibilityActions> { state, action ->
+    when (action) {
+        is VisibilityActions.SetVisibilityFilter -> { state }
+        else -> {
+            state
+        }
+    }
+}
+
+//fun visibilityFilterReducer(state: VisibilityFilter, action: Any) =
+//    when (action) {
+//        is SetVisibilityFilter -> action.visibilityFilter
+//        else -> state
+//    }
 
 /**
  * The root reducer of the app.  This is the reducer passed to `createStore()`.
  * Notice that sub-states are delegated to other reducers.
  */
-fun rootReducer(state: AppState, action: Any) = AppState(
-    todos = todosReducer(state.todos, action),
-    visibilityFilter = visibilityFilterReducer(state.visibilityFilter, action)
-)
+val rootReducer = combineReducers(todosReducer, visibilityFilterReducer)
 
 val loggerMiddleware = middleware<AppState> { store, next, action ->
     val result = next(action)
@@ -117,10 +132,10 @@ fun asyncMiddlewares(
     val dispatch = store.dispatch
 
     when (action) {
-        is AddTodoAsyncWithGlobalScope -> {
+        is TodoActions.AddTodoAsyncWithGlobalScope -> {
             dispatch(networkThunks.mockFetchGlobalScope(action.delay, action.text, action.completed))
         }
-        is AddTodoAsyncWithSuppliedScope -> {
+        is TodoActions.AddTodoAsyncWithSuppliedScope -> {
             dispatch(networkThunks.mockFetchSuppliedScope(action.scope, action.delay, action.text, action.completed))
         }
         else -> next(action)
@@ -152,11 +167,13 @@ class NetworkThunks(
         text: String,
         completed: Boolean
     ) = thunk { dispatch, getState, extraArgument ->
-        networkScope.launch {
 
+
+
+        networkScope.launch {
             appRepo.getTodo(delay)
 
-            dispatch(AddTodo(text, completed))
+            dispatch(TodoActions.AddTodo(text, completed))
         }
     }
 
@@ -170,7 +187,7 @@ class NetworkThunks(
 
             appRepo.getTodo(delay)
 
-            dispatch(AddTodo(text, completed))
+            dispatch(TodoActions.AddTodo(text, completed))
         }
     }
 }
