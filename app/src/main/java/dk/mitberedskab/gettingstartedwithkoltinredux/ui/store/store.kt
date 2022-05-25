@@ -91,6 +91,8 @@ val loggerMiddleware = middleware<AppState> { store, next, action ->
 }
 
 /**
+ * Very simple way one could implement async actions
+ *
  * Thunk middleware for async action dispatches.
  * Usage:
  *    val store = createStore(myReducer, initialState,
