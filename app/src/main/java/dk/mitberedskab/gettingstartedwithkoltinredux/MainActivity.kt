@@ -11,11 +11,8 @@ import androidx.compose.material.Button
 import androidx.compose.material.MaterialTheme
 import androidx.compose.material.Surface
 import androidx.compose.material.Text
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.runtime.livedata.observeAsState
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.lifecycle.LiveData
@@ -23,22 +20,24 @@ import androidx.lifecycle.MutableLiveData
 import dk.mitberedskab.gettingstartedwithkoltinredux.ui.store.*
 import dk.mitberedskab.gettingstartedwithkoltinredux.ui.theme.GettingStartedWithKoltinReduxTheme
 import kotlinx.coroutines.delay
-import org.reduxkotlin.Store
-import org.reduxkotlin.StoreSubscription
-import org.reduxkotlin.createThreadSafeStore
+import org.reduxkotlin.*
 
 class MainActivity : ComponentActivity() {
     /**
      * Prepare subscription to store
      */
-    lateinit var store: Store<AppState>
-    lateinit var storeSubscription: StoreSubscription
-    private var storeLiveData: MutableLiveData<AppState> = MutableLiveData()
+    private lateinit var store: Store<AppState>
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        store = createThreadSafeStore(::rootReducer, AppState())
-        storeSubscription = store.subscribe { storeLiveData.value = store.state }
+
+        store = createStore(
+            ::rootReducer,
+            AppState(),
+            applyMiddleware(
+                loggerMiddleware,
+            ),
+        )
 
         setContent {
             GettingStartedWithKoltinReduxTheme {
@@ -47,13 +46,61 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colors.background
                 ) {
-                    DisplayTodos( storeLiveData.observeAsState().value?.todos ) {
-                        store.dispatch(AddTodo("Some Todo", false))
+                    withStore(store = store) {
+                        val dispatcher = rememberDispatcher()
+                        val todosSlice by selectMyState { todos }
+
+                        DisplayTodos( todosSlice) {
+                            dispatcher(AddTodo("Some Todo", false))
+                        }
                     }
                 }
             }
         }
     }
+}
+
+@Composable
+inline fun <TSlice> selectMyState(
+    crossinline selector: @DisallowComposableCalls AppState.() -> TSlice
+): State<TSlice> = selectState(selector)
+
+@PublishedApi
+internal val LocalStore: ProvidableCompositionLocal<Store<*>?> = compositionLocalOf { null }
+
+@Composable
+@PublishedApi
+@Suppress("UNCHECKED_CAST")
+internal inline fun <reified TState> getStore(): Store<TState> =
+    LocalStore.current.runCatching { (this as Store<TState>) }.getOrElse {
+        error("Store<${TState::class.simpleName}> not found in current composition scope")
+    }
+
+@Composable
+inline fun <T : Any> withStore(store: Store<T>, crossinline content: @Composable () -> Unit) {
+    CompositionLocalProvider(LocalStore provides store) { content() }
+}
+
+@Composable
+fun rememberDispatcher(): Dispatcher = getStore<Any>().dispatch
+
+@Composable
+inline fun <reified TState, TSlice> selectState(
+    crossinline selector: @DisallowComposableCalls TState.() -> TSlice
+): State<TSlice> {
+    return getStore<TState>().selectState(selector)
+}
+
+@Composable
+inline fun <TState, TSlice> Store<TState>.selectState(
+    crossinline selector: @DisallowComposableCalls TState.() -> TSlice
+): State<TSlice> {
+    val result = remember { mutableStateOf(state.selector()) }
+    DisposableEffect(result) {
+        val unsubscribe = subscribe { result.value = state.selector() }
+        onDispose(unsubscribe)
+    }
+    return result
 }
 
 @Composable

@@ -1,8 +1,7 @@
 package dk.mitberedskab.gettingstartedwithkoltinredux.ui.store
 
-import androidx.lifecycle.MutableLiveData
-import kotlinx.coroutines.flow.MutableStateFlow
-import org.reduxkotlin.createThreadSafeStore
+import android.util.Log
+import org.reduxkotlin.middleware
 
 /**
  * to-do model
@@ -26,6 +25,7 @@ enum class VisibilityFilter {
  * Actions
  */
 data class AddTodo(val text: String, val completed: Boolean = false)
+data class AddTodoAsync(val text: String, val completed: Boolean)
 data class ToggleTodo(val index: Int)
 data class SetVisibilityFilter(val visibilityFilter: VisibilityFilter)
 
@@ -74,3 +74,9 @@ fun rootReducer(state: AppState, action: Any) = AppState(
     visibilityFilter = visibilityFilterReducer(state.visibilityFilter, action)
 )
 
+val loggerMiddleware = middleware<AppState> { store, next, action ->
+    val result = next(action)
+    Log.d("DISPATCH action:" ,"${action::class.simpleName}: $action")
+    Log.d("next state:", "${store.state}")
+    result
+}
